@@ -17,8 +17,8 @@ RUN npm run build
 # Remove dev dependencies after build
 RUN npm prune --omit=dev
 
-# Create data directory for SQLite
-RUN mkdir -p /data && chown -R node:node /data
+# Create data directories for SQLite with correct ownership
+RUN mkdir -p /data /app/data && chown -R node:node /data /app/data
 
 USER node
 

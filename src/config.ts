@@ -26,7 +26,7 @@ export const config = {
     expiresHours: parseInt(process.env.JWT_EXPIRES_HOURS || "72", 10),
   },
   db: {
-    path: process.env.SQLITE_PATH || "./data/signing-worker.db",
+    path: process.env.SQLITE_PATH || "/data/signing-worker.db",
   },
   smtp: {
     host: required("SMTP_HOST"),
