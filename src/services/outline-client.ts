@@ -99,10 +99,19 @@ export async function uploadAttachment(
     ? uploadUrl
     : `${config.outline.url}${uploadUrl}`;
 
+  const headers: Record<string, string> = {
+    ...formObj.getHeaders(),
+  };
+
+  // If uploading to Outline's own API, add auth
+  if (fullUrl.startsWith(config.outline.url)) {
+    headers["Authorization"] = `Bearer ${config.outline.apiKey}`;
+  }
+
   const res = await fetch(fullUrl, {
     method: "POST",
     body: formObj as unknown as Buffer,
-    headers: formObj.getHeaders(),
+    headers,
   });
 
   if (!res.ok) {
