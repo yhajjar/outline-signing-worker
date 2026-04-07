@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { config } from "../config";
 import { SigningRequest } from "./db";
+import { sanitizeFilename } from "../utils/filename";
 
 const transporter = nodemailer.createTransport({
   host: config.smtp.host,
@@ -56,12 +57,12 @@ export async function sendSigningRequest(data: SignRequestEmailData): Promise<vo
     </div>
   `;
 
-  const safeTitle = documentTitle.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 40);
+  const safeTitle = sanitizeFilename(documentTitle);
 
   await transporter.sendMail({
     from: config.smtp.from,
     to,
-    subject: `[Action Required] Document Approval: ${documentTitle}`,
+    subject: `[ACTION REQUIRED] Document Approval: ${documentTitle}`,
     html,
     attachments: [
       {
@@ -97,7 +98,7 @@ export async function sendApprovalConfirmation(data: {
     </div>
   `;
 
-  const safeTitle = documentTitle.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 40);
+  const safeTitle = sanitizeFilename(documentTitle);
 
   await transporter.sendMail({
     from: config.smtp.from,
@@ -168,7 +169,7 @@ export async function sendApprovedCopyToSigner(data: {
     </div>
   `;
 
-  const safeTitle = documentTitle.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 40);
+  const safeTitle = sanitizeFilename(documentTitle);
 
   await transporter.sendMail({
     from: config.smtp.from,

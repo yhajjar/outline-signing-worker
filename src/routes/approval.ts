@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { verifyApprovalToken, ApprovalToken } from "../utils/jwt";
+import { verifyApprovalToken } from "../utils/jwt";
 import {
   findRequestById,
   updateRequestStatus,
@@ -13,10 +13,25 @@ import {
   sendApprovedCopyToSigner,
 } from "../services/email-sender";
 import { config } from "../config";
+import { sanitizeFilename } from "../utils/filename";
 import pino from "pino";
 
 const log = pino();
 const router = Router();
+
+async function postAuditComment(
+  documentId: string,
+  text: string,
+  parentCommentId: string,
+  context: Record<string, string>
+): Promise<void> {
+  try {
+    await outline.createComment(documentId, text, parentCommentId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err: message, ...context }, "Failed to post audit comment");
+  }
+}
 
 function renderResultPage(
   title: string,
@@ -71,10 +86,13 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
   }
 
   if (signingReq.status !== "pending") {
+    const isSuperseded = signingReq.status === "superseded";
     res.status(200).send(
       renderResultPage(
-        "Already Processed",
-        `This document has already been ${signingReq.status}.`,
+        isSuperseded ? "Request Superseded" : "Already Processed",
+        isSuperseded
+          ? "This signature request has been replaced by a newer one. Please check your email for the latest request."
+          : `This document has already been ${signingReq.status}.`,
         signingReq.status === "approved"
       )
     );
@@ -99,7 +117,7 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
 
     // Upload PDF as attachment to Outline
     const attachmentResult = await outline.createAttachment(
-      `signed_${signingReq.document_title.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`,
+      `signed_${sanitizeFilename(signingReq.document_title)}.pdf`,
       signingReq.document_id,
       "application/pdf",
       pdfBuffer.length
@@ -109,7 +127,7 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
       attachmentResult.uploadUrl,
       attachmentResult.form,
       pdfBuffer,
-      `signed_${signingReq.document_title.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`
+      `signed_${sanitizeFilename(signingReq.document_title)}.pdf`
     );
 
     // Update signing request
@@ -117,17 +135,6 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
       pdf_hash: pdfHash,
       attachment_id: attachmentResult.attachment.id,
     });
-
-    // Post approval reply comment under the trigger comment
-    if (signingReq.trigger_comment_id) {
-      const timeStr = formatTime();
-      const approvalText = `\u2705 Signed by ${signer.name} at ${timeStr} \u00B7 Document hash: ${pdfHash.substring(0, 16)}... \u00B7 Signed PDF attached`;
-      await outline.createComment(
-        signingReq.document_id,
-        approvalText,
-        signingReq.trigger_comment_id
-      );
-    }
 
     // Send confirmation email to author
     await sendApprovalConfirmation({
@@ -148,6 +155,17 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
       pdfBuffer,
       documentUrl,
     });
+
+    if (signingReq.trigger_comment_id) {
+      const timeStr = formatTime();
+      const approvalText = `\u2705 Signed by ${signer.name} at ${timeStr} \u00B7 Document hash: ${pdfHash.substring(0, 16)}... \u00B7 Signed PDF attached`;
+      await postAuditComment(
+        signingReq.document_id,
+        approvalText,
+        signingReq.trigger_comment_id,
+        { requestId: signingReq.id, commentId: signingReq.trigger_comment_id }
+      );
+    }
 
     log.info(
       { requestId: signingReq.id, documentId: signingReq.document_id },
@@ -196,10 +214,13 @@ router.get("/reject/:token", async (req: Request<{ token: string }>, res: Respon
   }
 
   if (signingReq.status !== "pending") {
+    const isSuperseded = signingReq.status === "superseded";
     res.status(200).send(
       renderResultPage(
-        "Already Processed",
-        `This document has already been ${signingReq.status}.`,
+        isSuperseded ? "Request Superseded" : "Already Processed",
+        isSuperseded
+          ? "This signature request has been replaced by a newer one. Please check your email for the latest request."
+          : `This document has already been ${signingReq.status}.`,
         false
       )
     );
@@ -213,17 +234,6 @@ router.get("/reject/:token", async (req: Request<{ token: string }>, res: Respon
     // Update signing request
     updateRequestStatus(signingReq.id, "rejected");
 
-    // Post rejection reply comment under the trigger comment
-    if (signingReq.trigger_comment_id) {
-      const timeStr = formatTime();
-      const rejectionText = `\u274C Rejected by ${signer.name} at ${timeStr}`;
-      await outline.createComment(
-        signingReq.document_id,
-        rejectionText,
-        signingReq.trigger_comment_id
-      );
-    }
-
     // Notify author
     await sendRejectionNotice({
       authorEmail: author.email,
@@ -232,6 +242,17 @@ router.get("/reject/:token", async (req: Request<{ token: string }>, res: Respon
       documentTitle: signingReq.document_title,
       documentUrl,
     });
+
+    if (signingReq.trigger_comment_id) {
+      const timeStr = formatTime();
+      const rejectionText = `\u274C Rejected by ${signer.name} at ${timeStr}`;
+      await postAuditComment(
+        signingReq.document_id,
+        rejectionText,
+        signingReq.trigger_comment_id,
+        { requestId: signingReq.id, commentId: signingReq.trigger_comment_id }
+      );
+    }
 
     log.info(
       { requestId: signingReq.id, documentId: signingReq.document_id },
