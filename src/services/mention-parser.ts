@@ -32,7 +32,6 @@ export function parseSignCommands(markdown: string): ParseResult {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    let match: RegExpExecArray | null;
 
     // Check if this line contains /sign
     SIGN_COMMAND_REGEX.lastIndex = 0;
@@ -61,5 +60,66 @@ export function parseSignCommands(markdown: string): ParseResult {
     found: signers.length > 0,
     signers,
     cleanMarkdown: cleanLines.join("\n").trim(),
+  };
+}
+
+// --- ProseMirror JSON types ---
+
+export interface ProsemirrorNode {
+  type: string;
+  text?: string;
+  attrs?: Record<string, string | null>;
+  content?: ProsemirrorNode[];
+}
+
+export interface ProsemirrorDoc {
+  type: string;
+  content?: ProsemirrorNode[];
+}
+
+/**
+ * Parse `/sign @mention` commands from Outline comment ProseMirror JSON.
+ *
+ * Outline comments deliver content as ProseMirror JSON. A `/sign @User` comment
+ * looks like:
+ *   { type: "doc", content: [{ type: "paragraph", content: [
+ *     { type: "text", text: "/sign " },
+ *     { type: "mention", attrs: { type: "user", modelId: "<uuid>", label: "Name" } }
+ *   ]}]}
+ */
+export function parseSignCommandsFromProsemirror(data: ProsemirrorDoc): ParseResult {
+  const signers: ParsedSigner[] = [];
+  let foundSignCommand = false;
+
+  function walk(nodes: ProsemirrorNode[]): void {
+    for (const node of nodes) {
+      if (node.type === "text" && node.text) {
+        if (node.text.trim().startsWith("/sign")) {
+          foundSignCommand = true;
+        }
+      }
+      if (node.type === "mention" && node.attrs) {
+        if (node.attrs.type === "user" && node.attrs.modelId) {
+          signers.push({
+            displayName: node.attrs.label || node.attrs.modelId,
+            userId: node.attrs.modelId,
+            fullMatch: `@${node.attrs.label}`,
+          });
+        }
+      }
+      if (node.content) {
+        walk(node.content);
+      }
+    }
+  }
+
+  if (data?.content) {
+    walk(data.content);
+  }
+
+  return {
+    found: foundSignCommand && signers.length > 0,
+    signers,
+    cleanMarkdown: "",
   };
 }

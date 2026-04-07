@@ -45,6 +45,10 @@ async function resolveSignerAndAuthor(req: SigningRequest) {
   return { signer, author };
 }
 
+function formatTime(): string {
+  return new Date().toTimeString().slice(0, 5);
+}
+
 router.get("/approve/:token", async (req: Request<{ token: string }>, res: Response) => {
   const tokenPayload = verifyApprovalToken(req.params.token as string);
   if (!tokenPayload) {
@@ -114,9 +118,16 @@ router.get("/approve/:token", async (req: Request<{ token: string }>, res: Respo
       attachment_id: attachmentResult.attachment.id,
     });
 
-    // Update Outline document with approval notice
-    const approvedBlock = `\n\n---\n> **Approved** by ${signer.name}\n> Date: ${new Date().toISOString()}\n> Document Hash: \`${pdfHash.substring(0, 16)}...\``;
-    await outline.updateDocument(signingReq.document_id, signingReq.document_text + approvedBlock);
+    // Post approval reply comment under the trigger comment
+    if (signingReq.trigger_comment_id) {
+      const timeStr = formatTime();
+      const approvalText = `\u2705 Signed by ${signer.name} at ${timeStr} \u00B7 Document hash: ${pdfHash.substring(0, 16)}... \u00B7 Signed PDF attached`;
+      await outline.createComment(
+        signingReq.document_id,
+        approvalText,
+        signingReq.trigger_comment_id
+      );
+    }
 
     // Send confirmation email to author
     await sendApprovalConfirmation({
@@ -202,9 +213,16 @@ router.get("/reject/:token", async (req: Request<{ token: string }>, res: Respon
     // Update signing request
     updateRequestStatus(signingReq.id, "rejected");
 
-    // Update Outline document with rejection notice
-    const rejectedBlock = `\n\n---\n> **Rejected** by ${signer.name}\n> Date: ${new Date().toISOString()}`;
-    await outline.updateDocument(signingReq.document_id, signingReq.document_text + rejectedBlock);
+    // Post rejection reply comment under the trigger comment
+    if (signingReq.trigger_comment_id) {
+      const timeStr = formatTime();
+      const rejectionText = `\u274C Rejected by ${signer.name} at ${timeStr}`;
+      await outline.createComment(
+        signingReq.document_id,
+        rejectionText,
+        signingReq.trigger_comment_id
+      );
+    }
 
     // Notify author
     await sendRejectionNotice({

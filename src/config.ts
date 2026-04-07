@@ -14,6 +14,8 @@ export const config = {
   outline: {
     url: required("OUTLINE_URL").replace(/\/+$/, ""),
     apiKey: required("OUTLINE_API_KEY"),
+    botToken: required("OUTLINE_BOT_TOKEN"),
+    botUserId: required("OUTLINE_BOT_USER_ID"),
   },
   webhook: {
     secret: process.env.WEBHOOK_SECRET || "",

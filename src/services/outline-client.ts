@@ -26,12 +26,12 @@ interface AttachmentCreateResult {
   attachment: { id: string; url: string; [key: string]: unknown };
 }
 
-async function outlinePost<T>(endpoint: string, body: object): Promise<T> {
+async function outlinePost<T>(endpoint: string, body: object, token?: string): Promise<T> {
   const url = `${config.outline.url}/api/${endpoint}`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.outline.apiKey}`,
+      Authorization: `Bearer ${token || config.outline.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -118,4 +118,36 @@ export async function uploadAttachment(
     const body = await res.text();
     throw new Error(`File upload failed (${res.status}): ${body}`);
   }
+}
+
+interface CommentData {
+  id: string;
+}
+
+/**
+ * Create a comment on an Outline document using the bot token.
+ * Sends ProseMirror JSON data since the text field is not supported
+ * for programmatic API usage.
+ */
+export async function createComment(
+  documentId: string,
+  text: string,
+  parentCommentId?: string
+): Promise<CommentData> {
+  // Build minimal ProseMirror JSON: a single paragraph with the text
+  const data = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [{ type: "text", text }],
+      },
+    ],
+  };
+
+  const body: Record<string, unknown> = { documentId, data };
+  if (parentCommentId) {
+    body.parentCommentId = parentCommentId;
+  }
+  return outlinePost<CommentData>("comments.create", body, config.outline.botToken);
 }
