@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { parseSignCommandsFromProsemirror, ProsemirrorDoc } from "../services/mention-parser";
 import {
   createSigningRequest,
-  findPendingRequest,
+  supersedePendingRequests,
   findByCommentId,
 } from "../services/db";
 import * as outline from "../services/outline-client";
@@ -15,6 +15,20 @@ import pino from "pino";
 
 const log = pino();
 const router = Router();
+
+async function postAuditComment(
+  documentId: string,
+  text: string,
+  parentCommentId: string,
+  context: Record<string, string>
+): Promise<void> {
+  try {
+    await outline.createComment(documentId, text, parentCommentId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err: message, ...context }, "Failed to post audit comment");
+  }
+}
 
 interface CommentWebhookPayload {
   id: string;
@@ -100,17 +114,9 @@ router.post("/outline", async (req: Request, res: Response) => {
     const now = new Date();
     const timeStr = now.toTimeString().slice(0, 5);
 
-    for (const signer of result.signers) {
-      // Check if there's already a pending request for this doc+signer
-      const pending = findPendingRequest(documentId, signer.userId);
-      if (pending) {
-        log.info(
-          { documentId, signerUserId: signer.userId },
-          "Pending request already exists, skipping"
-        );
-        continue;
-      }
+    const allSuperseded: { id: string; triggerCommentId: string | null; createdAt: string }[] = [];
 
+    for (const signer of result.signers) {
       // Fetch signer user info (email)
       const signerUser = await outline.getUser(signer.userId);
       log.info(
@@ -119,6 +125,22 @@ router.post("/outline", async (req: Request, res: Response) => {
       );
 
       const requestId = crypto.randomUUID();
+
+      // Supersede any existing pending requests for this doc+signer
+      const superseded = supersedePendingRequests(documentId, signer.userId, requestId);
+      allSuperseded.push(...superseded);
+      for (const old of superseded) {
+        if (old.triggerCommentId) {
+          const supersedeTimeStr = new Date().toTimeString().slice(0, 5);
+          await postAuditComment(
+            documentId,
+            `\u23F0 Superseded by new signature request at ${supersedeTimeStr}`,
+            old.triggerCommentId,
+            { oldRequestId: old.id, commentId: old.triggerCommentId }
+          );
+        }
+      }
+
       const expiresAt = new Date(
         Date.now() + config.jwt.expiresHours * 60 * 60 * 1000
       ).toISOString();
@@ -182,11 +204,16 @@ router.post("/outline", async (req: Request, res: Response) => {
     const signerEmails = result.signers
       .map((s) => s.displayName)
       .join(", ");
-    const replyText = `\u{1F4CB} Signature request registered \u00B7 \u2709\uFE0F Email sent to ${signerEmails} \u00B7 ${timeStr}`;
+    let supersessionNote = "";
+    if (allSuperseded.length > 0) {
+      const earliest = allSuperseded[0].createdAt;
+      const dateStr = new Date(earliest).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      supersessionNote = ` (supersedes previous request from ${dateStr})`;
+    }
+    const replyText = `\u{1F4CB} Signature request registered${supersessionNote} \u00B7 \u2709\uFE0F Email sent to ${signerEmails} \u00B7 ${timeStr}`;
 
-    await outline.createComment(documentId, replyText, commentId);
-
-    log.info({ commentId, documentId }, "Bot reply posted");
+    await postAuditComment(documentId, replyText, commentId, { commentId, documentId });
+    log.info({ commentId, documentId }, "Webhook processing completed");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err: message, commentId }, "Error processing webhook");

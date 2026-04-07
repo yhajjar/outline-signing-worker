@@ -55,6 +55,11 @@ export function initDb(): Database.Database {
   } catch {
     // Column already exists — safe to ignore
   }
+  try {
+    db.exec("ALTER TABLE signing_requests ADD COLUMN superseded_by TEXT");
+  } catch {
+    // Column already exists — safe to ignore
+  }
 
   return db;
 }
@@ -85,10 +90,11 @@ export interface SigningRequest {
   created_at: string;
   resolved_at: string | null;
   expires_at: string;
+  superseded_by: string | null;
 }
 
 export function createSigningRequest(
-  req: Omit<SigningRequest, "created_at" | "resolved_at" | "pdf_hash" | "attachment_id" | "rejection_reason" | "expiry_notified">
+  req: Omit<SigningRequest, "created_at" | "resolved_at" | "pdf_hash" | "attachment_id" | "rejection_reason" | "expiry_notified" | "superseded_by">
 ): void {
   const db = getDb();
   db.prepare(
@@ -192,4 +198,32 @@ export function expireOldRequests(): number {
     )
     .run(new Date().toISOString());
   return result.changes;
+}
+
+export interface SupersededRequest {
+  id: string;
+  triggerCommentId: string | null;
+  createdAt: string;
+}
+
+export function supersedePendingRequests(
+  documentId: string,
+  signerUserId: string,
+  newRequestId: string
+): SupersededRequest[] {
+  const db = getDb();
+  const rows = db.prepare(
+    "SELECT id, trigger_comment_id, created_at FROM signing_requests WHERE document_id = ? AND signer_user_id = ? AND status = 'pending'"
+  ).all(documentId, signerUserId) as { id: string; trigger_comment_id: string | null; created_at: string }[];
+
+  for (const row of rows) {
+    db.prepare(
+      "UPDATE signing_requests SET status = 'superseded', resolved_at = ?, superseded_by = ? WHERE id = ?"
+    ).run(new Date().toISOString(), newRequestId, row.id);
+  }
+  return rows.map(r => ({
+    id: r.id,
+    triggerCommentId: r.trigger_comment_id,
+    createdAt: r.created_at,
+  }));
 }
