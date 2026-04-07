@@ -9,13 +9,18 @@ function required(name: string): string {
   return value;
 }
 
+function optional(name: string): string | undefined {
+  const value = process.env[name];
+  return value || undefined;
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3100", 10),
   outline: {
     url: required("OUTLINE_URL").replace(/\/+$/, ""),
     apiKey: required("OUTLINE_API_KEY"),
-    botToken: required("OUTLINE_BOT_TOKEN"),
-    botUserId: required("OUTLINE_BOT_USER_ID"),
+    botToken: optional("OUTLINE_BOT_TOKEN"),
+    botUserId: optional("OUTLINE_BOT_USER_ID"),
   },
   webhook: {
     secret: process.env.WEBHOOK_SECRET || "",

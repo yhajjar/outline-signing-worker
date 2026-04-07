@@ -59,7 +59,7 @@ router.post("/outline", async (req: Request, res: Response) => {
   }
 
   // Prevent self-triggering loops from bot's own reply comments
-  if (body.actorId === config.outline.botUserId) {
+  if (config.outline.botUserId && body.actorId === config.outline.botUserId) {
     log.info({ actorId: body.actorId }, "Ignoring bot's own comment");
     return;
   }
